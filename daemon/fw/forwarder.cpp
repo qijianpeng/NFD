@@ -24,7 +24,7 @@
  */
 
 #include "forwarder.hpp"
-
+#include "version"
 #include "algorithm.hpp"
 #include "best-route-strategy2.hpp"
 #include "strategy.hpp"
@@ -33,7 +33,7 @@
 #include "table/cleanup.hpp"
 
 #include <ndn-cxx/lp/tags.hpp>
-
+#include <ndn-cxx/util/snake-utils.hpp>
 #include "face/null-face.hpp"
 
 namespace nfd {
@@ -125,7 +125,27 @@ Forwarder::onIncomingInterest(const FaceEndpoint& ingress, const Interest& inter
 
   // PIT insert
   shared_ptr<pit::Entry> pitEntry = m_pit.insert(interest).first;
+//  // Added by QI-Jianpeng on Sep. 4, 2020
+//  bool isFunctionExectued = ndn::util::snake::isFunctionExecuted(interest);
+//  if(!isFunctionExectued){
+//  //try to execute the function
+//
+//	 Name name = interest.getName();
+//	 //Extract the function
+//	 //Fetch the Data
+//	 // Data missed
+//	 //Execute the function
+//  } else {
+//	  //Data is the result.
+//  }
 
+
+
+  
+
+
+
+  //
   // detect duplicate Nonce in PIT entry
   int dnw = fw::findDuplicateNonce(*pitEntry, interest.getNonce(), ingress.face);
   bool hasDuplicateNonceInPit = dnw != fw::DUPLICATE_NONCE_NONE;
@@ -366,7 +386,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       pitEntry->clearInRecords();
       pitEntry->deleteOutRecord(ingress.face);
     }
-
+    Data newData = make_shared<Data>(); //cache results
     // foreach pending downstream
     for (const auto& pendingDownstream : pendingDownstreams) {
       if (pendingDownstream.first->getId() == ingress.face.getId() &&
@@ -374,8 +394,28 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
           pendingDownstream.first->getLinkType() != ndn::nfd::LINK_TYPE_AD_HOC) {
         continue;
       }
+      //Added by QI-Jianpeng on Sep. 6,2020.
+      //Try to execute the function.
+      if(!ndn::util::snake::isFunctionExecuted(data) ){
+    	  //Gets the function
+    	  //Invoke the function(Should check the function store.
+    	  auto& pitEntry = pitMatches.front();
+    	  Name& name = pitEntry->getName();
+    	  //ndn://dataName/snake/functionName/parameters
+    	  std::string uri = name.toUri();
+        auto functionNameAndParameters = ndn::util::snake::extractFunctionNameAndParameters(uri);
+        std::string functionName = std::get<0>(functionNameAndParameters);
+        //TODO functionparameters should use Object.
+        std::string functionParameters = std::get<1>(functionNameAndParameters);
+        //try to execute the function
+        if( ndn::util::snake::canExecuteFunction(data) ){
+          // invoke(functionName, functionParameters)
+          ndn::util::snake::invoke(data, functionName, functionParameters);
+          ndn::util::snake::afterFunctionInvoke(data, newData);
+        }
+      }
       // goto outgoing Data pipeline
-      this->onOutgoingData(data, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
+      this->onOutgoingData(newData, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
     }
   }
 }

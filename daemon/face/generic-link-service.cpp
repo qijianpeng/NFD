@@ -27,6 +27,8 @@
 
 #include <ndn-cxx/lp/pit-token.hpp>
 #include <ndn-cxx/lp/tags.hpp>
+//Added by QI-Jianpeng on Sep. 2, 2020
+#include <ndn-cxx/lp/snake-tags.hpp>
 
 #include <cmath>
 
@@ -168,6 +170,12 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
     if (geoTag != nullptr) {
       lpPacket.add<lp::GeoTagField>(*geoTag);
     }
+  }
+  //Added by QI-Jianpeng on Sep. 2, 2020
+  //This tag is used to mark the function is executed or not.
+  shared_ptr<lp::FunctionTag> functionTag = netPkt.getTag<lp::FunctionTag>();
+  if (functionTag != nullptr) {
+    lpPacket.add<lp::FunctionTagField>(*functionTag);
   }
 }
 
@@ -410,6 +418,10 @@ GenericLinkService::decodeInterest(const Block& netPkt, const lp::Packet& firstP
   if (firstPkt.has<lp::PitTokenField>()) {
     interest->setTag(make_shared<lp::PitToken>(firstPkt.get<lp::PitTokenField>()));
   }
+  //Added by QI-Jianpeng on Sep. 3, 2020
+  if (firstPkt.has<lp::FunctionTagField>()) {
+    interest->setTag(make_shared<lp::FunctionTag>(firstPkt.get<lp::FunctionTagField>()));
+  }
 
   this->receiveInterest(*interest, endpointId);
 }
@@ -471,6 +483,10 @@ GenericLinkService::decodeData(const Block& netPkt, const lp::Packet& firstPkt,
     else {
       NFD_LOG_FACE_WARN("received PrefixAnnouncement, but self-learning disabled: IGNORE");
     }
+  }
+  //Added by QI-Jianpeng on Sep. 3, 2020
+  if (firstPkt.has<lp::FunctionTagField>()) {
+    data->setTag(make_shared<lp::FunctionTag>(firstPkt.get<lp::FunctionTagField>()));
   }
 
   this->receiveData(*data, endpointId);
