@@ -396,24 +396,27 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       }
       //Added by QI-Jianpeng on Sep. 6,2020.
       //Try to execute the function.
-      if(!ndn::util::snake::isFunctionExecuted(data) ){
+      using ndn::snake::util;
+      if(!isFunctionExecuted(data) ){
     	  //Gets the function
     	  //Invoke the function(Should check the function store.
     	  auto& pitEntry = pitMatches.front();
     	  Name& name = pitEntry->getName();
     	  //ndn://dataName/snake/functionName/parameters
     	  std::string uri = name.toUri();
-        auto functionNameAndParameters = ndn::util::snake::extractFunctionNameAndParameters(uri);
+        auto functionNameAndParameters = extractFunctionNameAndParameters(uri);
         std::string functionName = std::get<0>(functionNameAndParameters);
         //TODO functionparameters should use Object.
         std::string functionParameters = std::get<1>(functionNameAndParameters);
         //try to execute the function
-        if( ndn::util::snake::canExecuteFunction(data) ){
+        if( canExecuteFunction(data) ){
           // invoke(functionName, functionParameters)
-          ndn::util::snake::invoke(data, functionName, functionParameters);
-          ndn::util::snake::afterFunctionInvoke(data, newData);
+          util::invoke(data, functionName, functionParameters);
+          afterFunctionInvoke(data, newData);
         }
       }
+      //insert the result to keep away from re-computing.
+      m_cs.insert(newData);
       // goto outgoing Data pipeline
       this->onOutgoingData(newData, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
     }
