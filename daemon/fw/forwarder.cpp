@@ -396,8 +396,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       }
       //Added by QI-Jianpeng on Sep. 6,2020.
       //Try to execute the function.
-      using ndn::snake::util;
-      if(!isFunctionExecuted(data) ){
+      if(!ndn::snake::util::isFunctionExecuted(data) ){
     	  //Gets the function
     	  //Invoke the function(Should check the function store.
     	  auto& pitEntry = pitMatches.front();
@@ -411,7 +410,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
         //try to execute the function
         if( ndn::snake::util::canExecuteFunction(data) ){
           // invoke(functionName, functionParameters)
-          ndn::snake::util::invoke(data, functionName, functionParameters);
+          ndn::snake::util::functionInvoke(data, functionName, functionParameters);
           ndn::snake::util::afterFunctionInvoke(data, newData);
         }
       }
