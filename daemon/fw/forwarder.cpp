@@ -24,7 +24,7 @@
  */
 
 #include "forwarder.hpp"
-#include "version"
+//#include "version"
 #include "algorithm.hpp"
 #include "best-route-strategy2.hpp"
 #include "strategy.hpp"
@@ -404,15 +404,15 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     	  Name& name = pitEntry->getName();
     	  //ndn://dataName/snake/functionName/parameters
     	  std::string uri = name.toUri();
-        auto functionNameAndParameters = extractFunctionNameAndParameters(uri);
+        auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
         std::string functionName = std::get<0>(functionNameAndParameters);
         //TODO functionparameters should use Object.
         std::string functionParameters = std::get<1>(functionNameAndParameters);
         //try to execute the function
-        if( canExecuteFunction(data) ){
+        if( ndn::snake::util::canExecuteFunction(data) ){
           // invoke(functionName, functionParameters)
-          util::invoke(data, functionName, functionParameters);
-          afterFunctionInvoke(data, newData);
+          ndn::snake::util::invoke(data, functionName, functionParameters);
+          ndn::snake::util::afterFunctionInvoke(data, newData);
         }
       }
       //insert the result to keep away from re-computing.
