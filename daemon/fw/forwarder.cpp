@@ -386,7 +386,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       pitEntry->clearInRecords();
       pitEntry->deleteOutRecord(ingress.face);
     }
-    Data newData = make_shared<Data>(); //cache results
+    auto newData = make_shared<Data>(data.getName()); //cache results
     // foreach pending downstream
     for (const auto& pendingDownstream : pendingDownstreams) {
       if (pendingDownstream.first->getId() == ingress.face.getId() &&
@@ -400,7 +400,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     	  //Gets the function
     	  //Invoke the function(Should check the function store.
     	  auto& pitEntry = pitMatches.front();
-    	  Name& name = pitEntry->getName();
+    	  Name name = pitEntry->getName();
     	  //ndn://dataName/snake/functionName/parameters
     	  std::string uri = name.toUri();
         auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
@@ -411,13 +411,14 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
         if( ndn::snake::util::canExecuteFunction(data) ){
           // invoke(functionName, functionParameters)
           ndn::snake::util::functionInvoke(data, functionName, functionParameters);
-          ndn::snake::util::afterFunctionInvoke(data, newData);
+          ndn::snake::util::afterFunctionInvoke(data, *newData);
+       
         }
       }
       //insert the result to keep away from re-computing.
-      m_cs.insert(newData);
+      m_cs.insert(*newData);
       // goto outgoing Data pipeline
-      this->onOutgoingData(newData, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
+      this->onOutgoingData(*newData, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
     }
   }
 }
