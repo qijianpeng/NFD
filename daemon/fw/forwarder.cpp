@@ -24,7 +24,6 @@
  */
 
 #include "forwarder.hpp"
-//#include "version"
 #include "algorithm.hpp"
 #include "best-route-strategy2.hpp"
 #include "strategy.hpp"
@@ -276,7 +275,7 @@ Forwarder::onOutgoingInterest(const shared_ptr<pit::Entry>& pitEntry,
 void
 Forwarder::onInterestFinalize(const shared_ptr<pit::Entry>& pitEntry)
 {
-  NFD_LOG_DEBUG("onInterestFinalize interest=" << pitEntry->getName()
+  NDN_LOG_DEBUG("onInterestFinalize interest=" << pitEntry->getName()
                 << (pitEntry->isSatisfied ? " satisfied" : " unsatisfied"));
 
   if (!pitEntry->isSatisfied) {
@@ -323,9 +322,39 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     this->onDataUnsolicited(ingress, data);
     return;
   }
+  
+  //Added by qjp.
+  auto newData = ndn::snake::util::cloneData(data); //we need to modify data contents.
+  //Try to execute the function.
+  if(ndn::snake::util::isBelong2SnakeSystem(*newData) &&
+    !ndn::snake::util::isFunctionExecuted(*newData)){
+     //std::cout<<"onIncomingData in=" << ingress << " data=" << data.getName();
+    //Gets the function
+    //Invoke the function(Should check the function store.
+    auto& pitEntry = pitMatches.front();
+    Name name = pitEntry->getName();
+    ///dataName/snake/functionName/parameters
 
-  // CS insert
-  m_cs.insert(data);
+    std::string uri = name.toUri();
+    uri = ndn::snake::util::unescape(uri);
+    auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
+    std::string functionName = std::get<0>(functionNameAndParameters);
+    //TODO functionparameters should use Object.
+    std::string functionParameters = std::get<1>(functionNameAndParameters);
+    //try to execute the function
+    if( ndn::snake::util::canExecuteFunction(*newData) ){
+      NS_LOG_DEBUG("Begin executing function: " << functionName);
+      ndn::snake::util::functionInvoke(*newData, functionName, functionParameters);
+      NS_LOG_DEBUG("End executing function: " << functionName);
+      ndn::snake::util::afterFunctionInvoke(*newData);
+     // NS_LOG_INFO("onIncomingData Execute Function" << newData->getContent());
+    }
+    // CS insert
+     m_cs.insert(*newData);
+  } else {
+    m_cs.insert(data);
+  }
+  std::cout<<"onIncomingData matching=" << newData->getName()<<std::endl;
 
   // when only one PIT entry is matched, trigger strategy: after receive Data
   if (pitMatches.size() == 1) {
@@ -336,14 +365,14 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     // set PIT expiry timer to now
     this->setExpiryTimer(pitEntry, 0_ms);
 
-    beforeSatisfyInterest(*pitEntry, ingress.face, data);
+    beforeSatisfyInterest(*pitEntry, ingress.face, *newData);
     // trigger strategy: after receive Data
     this->dispatchToStrategy(*pitEntry,
-      [&] (fw::Strategy& strategy) { strategy.afterReceiveData(pitEntry, ingress, data); });
+      [&] (fw::Strategy& strategy) { strategy.afterReceiveData(pitEntry, ingress, *newData); });
 
     // mark PIT satisfied
     pitEntry->isSatisfied = true;
-    pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
+    pitEntry->dataFreshnessPeriod = newData->getFreshnessPeriod();
 
     // Dead Nonce List insert if necessary (for out-record of inFace)
     this->insertDeadNonceList(*pitEntry, &ingress.face);
@@ -371,13 +400,13 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       this->setExpiryTimer(pitEntry, 0_ms);
 
       // invoke PIT satisfy callback
-      beforeSatisfyInterest(*pitEntry, ingress.face, data);
+      beforeSatisfyInterest(*pitEntry, ingress.face, *newData);
       this->dispatchToStrategy(*pitEntry,
-        [&] (fw::Strategy& strategy) { strategy.beforeSatisfyInterest(pitEntry, ingress, data); });
+        [&] (fw::Strategy& strategy) { strategy.beforeSatisfyInterest(pitEntry, ingress, *newData); });
 
       // mark PIT satisfied
       pitEntry->isSatisfied = true;
-      pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
+      pitEntry->dataFreshnessPeriod = newData->getFreshnessPeriod();
 
       // Dead Nonce List insert if necessary (for out-record of inFace)
       this->insertDeadNonceList(*pitEntry, &ingress.face);
@@ -386,7 +415,6 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       pitEntry->clearInRecords();
       pitEntry->deleteOutRecord(ingress.face);
     }
-    auto newData = make_shared<Data>(data.getName()); //cache results
     // foreach pending downstream
     for (const auto& pendingDownstream : pendingDownstreams) {
       if (pendingDownstream.first->getId() == ingress.face.getId() &&
@@ -394,29 +422,6 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
           pendingDownstream.first->getLinkType() != ndn::nfd::LINK_TYPE_AD_HOC) {
         continue;
       }
-      //Added by QI-Jianpeng on Sep. 6,2020.
-      //Try to execute the function.
-      if(!ndn::snake::util::isFunctionExecuted(data) ){
-    	  //Gets the function
-    	  //Invoke the function(Should check the function store.
-    	  auto& pitEntry = pitMatches.front();
-    	  Name name = pitEntry->getName();
-    	  //ndn://dataName/snake/functionName/parameters
-    	  std::string uri = name.toUri();
-        auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
-        std::string functionName = std::get<0>(functionNameAndParameters);
-        //TODO functionparameters should use Object.
-        std::string functionParameters = std::get<1>(functionNameAndParameters);
-        //try to execute the function
-        if( ndn::snake::util::canExecuteFunction(data) ){
-          // invoke(functionName, functionParameters)
-          ndn::snake::util::functionInvoke(data, functionName, functionParameters);
-          ndn::snake::util::afterFunctionInvoke(data, *newData);
-       
-        }
-      }
-      //insert the result to keep away from re-computing.
-      m_cs.insert(*newData);
       // goto outgoing Data pipeline
       this->onOutgoingData(*newData, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
     }
