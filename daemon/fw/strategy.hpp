@@ -359,7 +359,13 @@ protected: // accessors
   {
     return m_forwarder.m_faceTable;
   }
-
+  
+  const Forwarder& 
+  getForwarder() const
+  {
+    return m_forwarder;
+  }
+  
 protected: // instance name
   struct ParsedInstanceName
   {

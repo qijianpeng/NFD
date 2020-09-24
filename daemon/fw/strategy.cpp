@@ -32,6 +32,9 @@
 #include <boost/range/adaptor/map.hpp>
 #include <boost/range/algorithm/copy.hpp>
 
+#include <ndn-cxx/util/snake-utils.hpp>
+#include <ndn-cxx/lp/tags.hpp>
+
 namespace nfd {
 namespace fw {
 
@@ -221,6 +224,10 @@ Strategy::afterNewNextHop(const fib::NextHop& nextHop, const shared_ptr<pit::Ent
   NFD_LOG_DEBUG("afterNewNextHop pitEntry=" << pitEntry->getName()
                 << " nexthop=" << nextHop.getFace().getId());
 }
+void functionInvoke( Data& data, const std::string functionName, const std::string functionParasJSONStr)
+{
+  ndn::snake::util::functionInvoke(data, functionName, functionParasJSONStr);
+}
 
 void
 Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
@@ -237,14 +244,37 @@ Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
   // delete the PIT entry's in-record based on egress,
   // since Data is sent to face and endpoint from which the Interest was received
   pitEntry->deleteInRecord(egress.face);
+  auto copiedData = ndn::snake::util::cloneData(data);
+    	  shared_ptr<lp::FunctionTag> tag = copiedData->getTag<lp::FunctionTag>();
+    NFD_LOG_DEBUG(">>> sendData receive functiontag is : " << (tag == nullptr? 0:*tag));
+
+  if(ndn::snake::util::isBelong2SnakeSystem(*copiedData) &&
+     !(ndn::snake::util::isFunctionExecuted(*copiedData))){
+
+
+
+    std::string uri = copiedData->getName().toUri();
+    uri = ndn::snake::util::unescape(uri);
+    auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
+    std::string functionName = std::get<0>(functionNameAndParameters);
+    //TODO functionparameters should use Object.
+    std::string functionParameters = std::get<1>(functionNameAndParameters);
+    if( ndn::snake::util::canExecuteFunction(*copiedData) ){
+      NFD_LOG_DEBUG("Begin executing function: " << functionName);
+      functionInvoke(*copiedData, functionName, functionParameters);
+      NFD_LOG_DEBUG("End executing function: " << functionName);
+      ndn::snake::util::afterFunctionInvoke(*copiedData);
+      NFD_LOG_DEBUG("Function results: " << copiedData->getContent().value());
+    }
+  }
 
   if (pitToken != nullptr) {
-    Data data2 = data; // make a copy so each downstream can get a different PIT token
+    Data data2 = *copiedData; // make a copy so each downstream can get a different PIT token
     data2.setTag(pitToken);
     m_forwarder.onOutgoingData(data2, egress);
     return;
   }
-  m_forwarder.onOutgoingData(data, egress);
+  m_forwarder.onOutgoingData(*copiedData, egress);
 }
 
 void
@@ -269,6 +299,7 @@ Strategy::sendDataToAll(const shared_ptr<pit::Entry>& pitEntry,
     this->sendData(pitEntry, data, FaceEndpoint(*pendingDownstream, 0));
   }
 }
+
 
 void
 Strategy::sendNacks(const shared_ptr<pit::Entry>& pitEntry, const lp::NackHeader& header,

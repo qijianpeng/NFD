@@ -24,6 +24,7 @@
  */
 
 #include "forwarder.hpp"
+
 #include "algorithm.hpp"
 #include "best-route-strategy2.hpp"
 #include "strategy.hpp"
@@ -32,7 +33,7 @@
 #include "table/cleanup.hpp"
 
 #include <ndn-cxx/lp/tags.hpp>
-#include <ndn-cxx/util/snake-utils.hpp>
+
 #include "face/null-face.hpp"
 
 namespace nfd {
@@ -124,27 +125,7 @@ Forwarder::onIncomingInterest(const FaceEndpoint& ingress, const Interest& inter
 
   // PIT insert
   shared_ptr<pit::Entry> pitEntry = m_pit.insert(interest).first;
-//  // Added by QI-Jianpeng on Sep. 4, 2020
-//  bool isFunctionExectued = ndn::util::snake::isFunctionExecuted(interest);
-//  if(!isFunctionExectued){
-//  //try to execute the function
-//
-//	 Name name = interest.getName();
-//	 //Extract the function
-//	 //Fetch the Data
-//	 // Data missed
-//	 //Execute the function
-//  } else {
-//	  //Data is the result.
-//  }
 
-
-
-  
-
-
-
-  //
   // detect duplicate Nonce in PIT entry
   int dnw = fw::findDuplicateNonce(*pitEntry, interest.getNonce(), ingress.face);
   bool hasDuplicateNonceInPit = dnw != fw::DUPLICATE_NONCE_NONE;
@@ -275,7 +256,7 @@ Forwarder::onOutgoingInterest(const shared_ptr<pit::Entry>& pitEntry,
 void
 Forwarder::onInterestFinalize(const shared_ptr<pit::Entry>& pitEntry)
 {
-  NDN_LOG_DEBUG("onInterestFinalize interest=" << pitEntry->getName()
+  NFD_LOG_DEBUG("onInterestFinalize interest=" << pitEntry->getName()
                 << (pitEntry->isSatisfied ? " satisfied" : " unsatisfied"));
 
   if (!pitEntry->isSatisfied) {
@@ -322,39 +303,9 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     this->onDataUnsolicited(ingress, data);
     return;
   }
-  
-  //Added by qjp.
-  auto newData = ndn::snake::util::cloneData(data); //we need to modify data contents.
-  //Try to execute the function.
-  if(ndn::snake::util::isBelong2SnakeSystem(*newData) &&
-    !ndn::snake::util::isFunctionExecuted(*newData)){
-     //std::cout<<"onIncomingData in=" << ingress << " data=" << data.getName();
-    //Gets the function
-    //Invoke the function(Should check the function store.
-    auto& pitEntry = pitMatches.front();
-    Name name = pitEntry->getName();
-    ///dataName/snake/functionName/parameters
 
-    std::string uri = name.toUri();
-    uri = ndn::snake::util::unescape(uri);
-    auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
-    std::string functionName = std::get<0>(functionNameAndParameters);
-    //TODO functionparameters should use Object.
-    std::string functionParameters = std::get<1>(functionNameAndParameters);
-    //try to execute the function
-    if( ndn::snake::util::canExecuteFunction(*newData) ){
-      NS_LOG_DEBUG("Begin executing function: " << functionName);
-      ndn::snake::util::functionInvoke(*newData, functionName, functionParameters);
-      NS_LOG_DEBUG("End executing function: " << functionName);
-      ndn::snake::util::afterFunctionInvoke(*newData);
-     // NS_LOG_INFO("onIncomingData Execute Function" << newData->getContent());
-    }
-    // CS insert
-     m_cs.insert(*newData);
-  } else {
-    m_cs.insert(data);
-  }
-  std::cout<<"onIncomingData matching=" << newData->getName()<<std::endl;
+  // CS insert
+  m_cs.insert(data);
 
   // when only one PIT entry is matched, trigger strategy: after receive Data
   if (pitMatches.size() == 1) {
@@ -365,14 +316,14 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     // set PIT expiry timer to now
     this->setExpiryTimer(pitEntry, 0_ms);
 
-    beforeSatisfyInterest(*pitEntry, ingress.face, *newData);
+    beforeSatisfyInterest(*pitEntry, ingress.face, data);
     // trigger strategy: after receive Data
     this->dispatchToStrategy(*pitEntry,
-      [&] (fw::Strategy& strategy) { strategy.afterReceiveData(pitEntry, ingress, *newData); });
+      [&] (fw::Strategy& strategy) { strategy.afterReceiveData(pitEntry, ingress, data); });
 
     // mark PIT satisfied
     pitEntry->isSatisfied = true;
-    pitEntry->dataFreshnessPeriod = newData->getFreshnessPeriod();
+    pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
     // Dead Nonce List insert if necessary (for out-record of inFace)
     this->insertDeadNonceList(*pitEntry, &ingress.face);
@@ -400,13 +351,13 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       this->setExpiryTimer(pitEntry, 0_ms);
 
       // invoke PIT satisfy callback
-      beforeSatisfyInterest(*pitEntry, ingress.face, *newData);
+      beforeSatisfyInterest(*pitEntry, ingress.face, data);
       this->dispatchToStrategy(*pitEntry,
-        [&] (fw::Strategy& strategy) { strategy.beforeSatisfyInterest(pitEntry, ingress, *newData); });
+        [&] (fw::Strategy& strategy) { strategy.beforeSatisfyInterest(pitEntry, ingress, data); });
 
       // mark PIT satisfied
       pitEntry->isSatisfied = true;
-      pitEntry->dataFreshnessPeriod = newData->getFreshnessPeriod();
+      pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
       // Dead Nonce List insert if necessary (for out-record of inFace)
       this->insertDeadNonceList(*pitEntry, &ingress.face);
@@ -415,6 +366,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       pitEntry->clearInRecords();
       pitEntry->deleteOutRecord(ingress.face);
     }
+
     // foreach pending downstream
     for (const auto& pendingDownstream : pendingDownstreams) {
       if (pendingDownstream.first->getId() == ingress.face.getId() &&
@@ -423,7 +375,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
         continue;
       }
       // goto outgoing Data pipeline
-      this->onOutgoingData(*newData, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
+      this->onOutgoingData(data, FaceEndpoint(*pendingDownstream.first, pendingDownstream.second));
     }
   }
 }
