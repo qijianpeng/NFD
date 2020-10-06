@@ -34,7 +34,11 @@
 
 #include <ndn-cxx/util/snake-utils.hpp>
 #include <ndn-cxx/lp/tags.hpp>
-
+#include "ns3/node-list.h"
+#include "ns3/node.h"
+#include "ns3/ptr.h"
+#include "ns3/computation-module.h"
+#include "ns3/core-module.h"
 namespace nfd {
 namespace fw {
 
@@ -245,26 +249,35 @@ Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
   // since Data is sent to face and endpoint from which the Interest was received
   pitEntry->deleteInRecord(egress.face);
   auto copiedData = ndn::snake::util::cloneData(data);
-    	  shared_ptr<lp::FunctionTag> tag = copiedData->getTag<lp::FunctionTag>();
-    NFD_LOG_DEBUG(">>> sendData receive functiontag is : " << (tag == nullptr? 0:*tag));
+  // shared_ptr<lp::FunctionTag> tag = copiedData->getTag<lp::FunctionTag>();
+  // NFD_LOG_DEBUG(">>> sendData receive functiontag is : " << (tag == nullptr? 0:*tag));
 
   if(ndn::snake::util::isBelong2SnakeSystem(*copiedData) &&
      !(ndn::snake::util::isFunctionExecuted(*copiedData))){
-
-
-
-    std::string uri = copiedData->getName().toUri();
-    uri = ndn::snake::util::unescape(uri);
-    auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
-    std::string functionName = std::get<0>(functionNameAndParameters);
-    //TODO functionparameters should use Object.
-    std::string functionParameters = std::get<1>(functionNameAndParameters);
     if( ndn::snake::util::canExecuteFunction(*copiedData) ){
+      //Gets the current Node
+      int contextVal = ns3::Simulator::GetContext();
+      if(contextVal != -1){
+        ns3::Ptr<ns3::Node> node = ns3::NodeList::GetNode(contextVal);
+        NFD_LOG_DEBUG("Current Node ID: " << node->GetId());
+        ns3::Ptr<ns3::ComputationModel> cm = node->GetObject<ns3::ComputationModel>();
+        ns3::SysInfo sysinfo = cm->GetSystemStateInfo();
+        NFD_LOG_DEBUG("System state information on node <" << node->GetId() <<">" << 
+                      sysinfo.Serialize());
+        //node->TraceConnect();
+      }
+      //Invoke the function by the current node
+      //(Since we are in simulator, not real distributed env.)
+      std::string uri = copiedData->getName().toUri();
+      uri = ndn::snake::util::unescape(uri);
+      auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
+      std::string functionName = std::get<0>(functionNameAndParameters);
+      //TODO functionparameters should use Object.
+      std::string functionParameters = std::get<1>(functionNameAndParameters);
       NFD_LOG_DEBUG("Begin executing function: " << functionName);
       functionInvoke(*copiedData, functionName, functionParameters);
       NFD_LOG_DEBUG("End executing function: " << functionName);
       ndn::snake::util::afterFunctionInvoke(*copiedData);
-      NFD_LOG_DEBUG("Function results: " << copiedData->getContent().value());
     }
   }
 

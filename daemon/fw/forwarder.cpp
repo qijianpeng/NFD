@@ -316,7 +316,6 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     // set PIT expiry timer to now
     this->setExpiryTimer(pitEntry, 0_ms);
 
-    beforeSatisfyInterest(*pitEntry, ingress.face, data);
     // trigger strategy: after receive Data
     this->dispatchToStrategy(*pitEntry,
       [&] (fw::Strategy& strategy) { strategy.afterReceiveData(pitEntry, ingress, data); });
@@ -351,7 +350,6 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       this->setExpiryTimer(pitEntry, 0_ms);
 
       // invoke PIT satisfy callback
-      beforeSatisfyInterest(*pitEntry, ingress.face, data);
       this->dispatchToStrategy(*pitEntry,
         [&] (fw::Strategy& strategy) { strategy.beforeSatisfyInterest(pitEntry, ingress, data); });
 
