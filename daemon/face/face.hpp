@@ -201,7 +201,8 @@ Face::sendInterest(const Interest& interest, const EndpointId& endpointId)
 inline void
 Face::sendData(const Data& data, const EndpointId& endpointId)
 {
-  m_service->sendData(data, endpointId);
+  m_service->sendData(data, endpointId);  
+  //ns3::Simulator::Schedule(ns3::MilliSeconds(101l), &LinkService::sendData, &m_service, data, endpointId);
 }
 
 inline void

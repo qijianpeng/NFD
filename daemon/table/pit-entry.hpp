@@ -153,6 +153,12 @@ public: // in-record
   void
   clearInRecords();
 
+  bool
+  hasNonExpiredLongLivedInRecord(time::steady_clock::time_point now);
+
+  void
+  deleteExpiredOrNonLongLivedInRecords(time::steady_clock::time_point now);
+
 public: // out-record
   /** \return collection of in-records
    */

@@ -35,9 +35,10 @@
 #include <ndn-cxx/lp/tags.hpp>
 
 #include "face/null-face.hpp"
+#include <ndn-cxx/util/snake-utils.hpp>
 
 namespace nfd {
-
+namespace snake_util = ::ndn::snake::util;
 NFD_LOG_INIT(Forwarder);
 
 static Name
@@ -142,7 +143,7 @@ Forwarder::onIncomingInterest(const FaceEndpoint& ingress, const Interest& inter
   }
 
   // is pending?
-  if (!pitEntry->hasInRecords()) {
+  if (!pitEntry->hasInRecords() && !interest.isLongLived()) {
     m_cs.find(interest,
               bind(&Forwarder::onContentStoreHit, this, ingress, pitEntry, _1, _2),
               bind(&Forwarder::onContentStoreMiss, this, ingress, pitEntry, _1));
@@ -189,7 +190,9 @@ Forwarder::onContentStoreMiss(const FaceEndpoint& ingress,
                                          return a.getExpiry() < b.getExpiry();
                                        });
   auto lastExpiryFromNow = lastExpiring->getExpiry() - time::steady_clock::now();
-  this->setExpiryTimer(pitEntry, time::duration_cast<time::milliseconds>(lastExpiryFromNow));
+  if(!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now())){
+    this->setExpiryTimer(pitEntry, time::duration_cast<time::milliseconds>(lastExpiryFromNow));
+  }
 
   // has NextHopFaceId?
   auto nextHopTag = interest.getTag<lp::NextHopFaceIdTag>();
@@ -228,7 +231,10 @@ Forwarder::onContentStoreHit(const FaceEndpoint& ingress, const shared_ptr<pit::
   pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
   // set PIT expiry timer to now
-  this->setExpiryTimer(pitEntry, 0_ms);
+  if (!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now()))
+  {
+    this->setExpiryTimer(pitEntry, 0_ms);
+  }
 
   beforeSatisfyInterest(*pitEntry, *m_csFace, data);
   this->dispatchToStrategy(*pitEntry,
@@ -286,7 +292,11 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
   NFD_LOG_DEBUG("onIncomingData in=" << ingress << " data=" << data.getName());
   data.setTag(make_shared<lp::IncomingFaceIdTag>(ingress.face.getId()));
   ++m_counters.nInData;
-
+  auto dataPushTag = data.getTag<lp::DataPushTag>();
+  if(nullptr != dataPushTag) {
+    NFD_LOG_DEBUG("Receieve a DataPushTag: " << * dataPushTag 
+                                               << ". Fake data.");
+  }
   // /localhost scope control
   bool isViolatingLocalhost = ingress.face.getScope() == ndn::nfd::FACE_SCOPE_NON_LOCAL &&
                               scope_prefix::LOCALHOST.isPrefixOf(data.getName());
@@ -295,7 +305,27 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     // (drop)
     return;
   }
+  Name dataName = data.getName();
+  // issue #21, establishing session between comsumer and producer.
+  // Session id here is from `consumerId xor producerId`.
+  auto combinedSessionIdPtr = data.getTag<lp::SessionTag>();
 
+  if(dataPushTag == nullptr && combinedSessionIdPtr != nullptr){
+    //Establish session link
+    NFD_LOG_DEBUG("CombinedSessionId: " << *combinedSessionIdPtr);
+    Name sessionName = snake_util::recombineNameWithSessionId(dataName, *combinedSessionIdPtr);
+    fib::Entry* entry = m_fib.insert(sessionName).first;
+    shared_ptr<Face> incomingFace = const_pointer_cast<Face>(ingress.face.shared_from_this());
+    m_fib.addOrUpdateNextHop(*entry, *incomingFace, 0);
+    NFD_LOG_DEBUG("onIncomingData in=" << ingress << " create a fib entry: " << entry->getPrefix().toUri());
+  }
+  // if(dataPushTag != nullptr && combinedSessionIdPtr != nullptr){
+  //   //DO NOT USE PIT ENTRY HERE!
+  //   //Directly push the data toward session link.
+  //   Name sessionName = snake_util::recombineNameWithSessionId(dataName, *combinedSessionIdPtr);
+  //   // fib::Entry* entry = m_fib.findExactMatch(sessionName)//< Specially for a session. pitEntry here should not null.
+    
+  // }
   // PIT match
   pit::DataMatchResult pitMatches = m_pit.findAllDataMatches(data);
   if (pitMatches.size() == 0) {
@@ -306,7 +336,7 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
 
   // CS insert
   m_cs.insert(data);
-
+  
   // when only one PIT entry is matched, trigger strategy: after receive Data
   if (pitMatches.size() == 1) {
     auto& pitEntry = pitMatches.front();
@@ -314,7 +344,9 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     NFD_LOG_DEBUG("onIncomingData matching=" << pitEntry->getName());
 
     // set PIT expiry timer to now
-    this->setExpiryTimer(pitEntry, 0_ms);
+    if(!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now())){
+      this->setExpiryTimer(pitEntry, 0_ms);
+    }
 
     // trigger strategy: after receive Data
     this->dispatchToStrategy(*pitEntry,
@@ -324,11 +356,13 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     pitEntry->isSatisfied = true;
     pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
-    // Dead Nonce List insert if necessary (for out-record of inFace)
-    this->insertDeadNonceList(*pitEntry, &ingress.face);
-
-    // delete PIT entry's out-record
-    pitEntry->deleteOutRecord(ingress.face);
+    pitEntry->deleteExpiredOrNonLongLivedInRecords(time::steady_clock::now());
+    if(!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now())) {
+      // Dead Nonce List insert if necessary (for out-record of inFace)
+      this->insertDeadNonceList(*pitEntry, &ingress.face);
+      // delete PIT entry's out-record
+      pitEntry->deleteOutRecord(ingress.face);
+    }
   }
   // when more than one PIT entry is matched, trigger strategy: before satisfy Interest,
   // and send Data to all matched out faces
@@ -347,7 +381,9 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       }
 
       // set PIT expiry timer to now
-      this->setExpiryTimer(pitEntry, 0_ms);
+      if(!pitEntry->hasNonExpiredLongLivedInRecord(now)) {
+        this->setExpiryTimer(pitEntry, 0_ms);
+      }
 
       // invoke PIT satisfy callback
       this->dispatchToStrategy(*pitEntry,
@@ -357,12 +393,18 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       pitEntry->isSatisfied = true;
       pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
-      // Dead Nonce List insert if necessary (for out-record of inFace)
-      this->insertDeadNonceList(*pitEntry, &ingress.face);
+      pitEntry->deleteExpiredOrNonLongLivedInRecords(now);
+      if(!pitEntry->hasNonExpiredLongLivedInRecord(now)) {
+        // Dead Nonce List insert if necessary (for out-record of inFace)
+        this->insertDeadNonceList(*pitEntry, &ingress.face);
 
-      // clear PIT entry's in and out records
-      pitEntry->clearInRecords();
-      pitEntry->deleteOutRecord(ingress.face);
+        // clear PIT entry's in and out records
+        pitEntry->clearInRecords();
+        pitEntry->deleteOutRecord(ingress.face);
+      } else {
+        //TODO what will happen?
+        
+      }
     }
 
     // foreach pending downstream
@@ -378,6 +420,27 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
   }
 }
 
+// void
+// Forwarder::onPushedData(const Face& face, const Data& data)
+// {
+//   NFD_LOG_DEBUG("onIncomingPushedData");
+//   if(!m_cs.contains(data)) {
+//     // If Data was never seen, store it and forward it.
+//     m_cs.insert(data);
+//     //Using FIB???? Are next hops towards Consumer??????
+//     const fib::Entry& fibEntry = m_fib.findLongestPrefixMatch(data.getName());
+//     const fib::NextHopList& nexthops = fibEntry.getNextHops();
+//     // Determine the minimum cost in the RIB entry.
+//     uint64_t minCost = std::numeric_limits<uint64_t>::max();
+//     for(auto const& nh : nexthops)
+//         if(nh.getCost() < minCost)
+//           minCost = nh.getCost();
+//     // Forward to all devices with minCost.
+//     for(auto const& nh : nexthops)
+//         if(nh.getCost() == minCost && face.getId() != nh.getFace().getId())
+//           this->onOutgoingData(data, nh.getFace );
+//   }
+// }
 void
 Forwarder::onDataUnsolicited(const FaceEndpoint& ingress, const Data& data)
 {
@@ -408,10 +471,18 @@ Forwarder::onOutgoingData(const Data& data, const FaceEndpoint& egress)
     // (drop)
     return;
   }
-
+  auto metaDataTag = data.getTag<lp::MetaDataTag>();
+  auto snakeTag = data.getTag<lp::FunctionTag>();
+  if(nullptr != snakeTag && nullptr == metaDataTag){//ignore the metadata
+  pit::DataMatchResult pitMatches = m_pit.findAllDataMatches(data);
+    for (const auto& pitEntry : pitMatches) {
+        this->setExpiryTimer(pitEntry, 0_ms);//Delete the matached pit entry.
+    }
+  }
   // TODO traffic manager
 
   // send Data
+  //
   egress.face.sendData(data, egress.endpoint);
   ++m_counters.nOutData;
 }
@@ -569,7 +640,7 @@ Forwarder::setExpiryTimer(const shared_ptr<pit::Entry>& pitEntry, time::millisec
 {
   BOOST_ASSERT(pitEntry);
   BOOST_ASSERT(duration >= 0_ms);
-
+  
   pitEntry->expiryTimer.cancel();
   pitEntry->expiryTimer = getScheduler().schedule(duration, [=] { onInterestFinalize(pitEntry); });
 }

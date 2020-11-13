@@ -28,7 +28,8 @@
 #include <ndn-cxx/lp/pit-token.hpp>
 #include <ndn-cxx/lp/tags.hpp>
 //Added by QI-Jianpeng on Sep. 2, 2020
-#include <ndn-cxx/lp/snake-tags.hpp>
+//#include <ndn-cxx/lp/snake-tags.hpp>
+#include "ns3/simulator.h"//< Just for simulation.
 
 #include <cmath>
 
@@ -177,6 +178,32 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
   if (functionTag != nullptr) {
     lpPacket.add<lp::FunctionTagField>(*functionTag);
   }
+  shared_ptr<lp::SessionTag> sessionTag = netPkt.getTag<lp::SessionTag>();
+  if (sessionTag != nullptr) {
+    lpPacket.add<lp::SessionTagField>(*sessionTag);
+  }
+  shared_ptr<lp::DataPushTag> dataPushTag = netPkt.getTag<lp::DataPushTag>();
+  if (dataPushTag != nullptr) {
+    lpPacket.add<lp::DataPushTagField>(*dataPushTag);
+  }
+  shared_ptr<lp::ProcessingTimeTag> processingTimeTag = netPkt.getTag<lp::ProcessingTimeTag>();
+  if (processingTimeTag != nullptr) {
+    lpPacket.add<lp::ProcessingTimeTagField>(*processingTimeTag);
+  }
+  shared_ptr<lp::MetaDataTag> metaDataTag = netPkt.getTag<lp::MetaDataTag>();
+  if (metaDataTag != nullptr) {
+    lpPacket.add<lp::MetaDataTagField>(*metaDataTag);
+  }
+  shared_ptr<lp::MinCostTag> minCostTag = netPkt.getTag<lp::MinCostTag>();
+  if (minCostTag != nullptr) {
+    lpPacket.add<lp::MinCostTagField>(*minCostTag);
+  }
+  shared_ptr<lp::MinCostMarkerTag> minCostMarkerTag = netPkt.getTag<lp::MinCostMarkerTag>();
+  if (minCostMarkerTag != nullptr) {
+    lpPacket.add<lp::MinCostMarkerTagField>(*minCostMarkerTag);
+  }
+  
+  
 }
 
 void
@@ -422,7 +449,15 @@ GenericLinkService::decodeInterest(const Block& netPkt, const lp::Packet& firstP
   if (firstPkt.has<lp::FunctionTagField>()) {
     interest->setTag(make_shared<lp::FunctionTag>(firstPkt.get<lp::FunctionTagField>()));
   }
-
+  if(firstPkt.has<lp::SessionTagField>()) {
+    interest->setTag(make_shared<lp::SessionTag>(firstPkt.get<lp::SessionTagField>()));
+  }
+  if(firstPkt.has<lp::DataPushTagField>()) {
+    interest->setTag(make_shared<lp::DataPushTag>(firstPkt.get<lp::DataPushTagField>()));
+  }
+  if(firstPkt.has<lp::MinCostMarkerTagField>()) {
+    interest->setTag(make_shared<lp::MinCostMarkerTag>(firstPkt.get<lp::MinCostMarkerTagField>()));
+  }
   this->receiveInterest(*interest, endpointId);
 }
 
@@ -488,7 +523,24 @@ GenericLinkService::decodeData(const Block& netPkt, const lp::Packet& firstPkt,
   if (firstPkt.has<lp::FunctionTagField>()) {
     data->setTag(make_shared<lp::FunctionTag>(firstPkt.get<lp::FunctionTagField>()));
   }
-
+  if(firstPkt.has<lp::SessionTagField>()) {
+    data->setTag(make_shared<lp::SessionTag>(firstPkt.get<lp::SessionTagField>()));
+  }  
+  if(firstPkt.has<lp::DataPushTagField>()) {
+    data->setTag(make_shared<lp::DataPushTag>(firstPkt.get<lp::DataPushTagField>()));
+  }
+  if(firstPkt.has<lp::ProcessingTimeTagField>()) {
+    data->setTag(make_shared<lp::ProcessingTimeTag>(firstPkt.get<lp::ProcessingTimeTagField>()));
+  }
+  if(firstPkt.has<lp::MetaDataTagField>()) {
+    data->setTag(make_shared<lp::MetaDataTag>(firstPkt.get<lp::MetaDataTagField>()));
+  }
+  if(firstPkt.has<lp::MinCostTagField>()) {
+    data->setTag(make_shared<lp::MinCostTag>(firstPkt.get<lp::MinCostTagField>()));
+  }
+  if(firstPkt.has<lp::MinCostMarkerTagField>()) {
+    data->setTag(make_shared<lp::MinCostMarkerTag>(firstPkt.get<lp::MinCostMarkerTagField>()));
+  }
   this->receiveData(*data, endpointId);
 }
 

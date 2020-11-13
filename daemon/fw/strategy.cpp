@@ -31,7 +31,7 @@
 
 #include <boost/range/adaptor/map.hpp>
 #include <boost/range/algorithm/copy.hpp>
-
+#include <climits>
 #include <ndn-cxx/util/snake-utils.hpp>
 #include <ndn-cxx/lp/tags.hpp>
 #include "ns3/node-list.h"
@@ -39,8 +39,11 @@
 #include "ns3/ptr.h"
 #include "ns3/computation-module.h"
 #include "ns3/core-module.h"
+#include "ns3/simulator.h"//< Just for simulation.
+
 namespace nfd {
 namespace fw {
+namespace snake_util = ::ndn::snake::util;
 
 NFD_LOG_INIT(Strategy);
 
@@ -228,11 +231,21 @@ Strategy::afterNewNextHop(const fib::NextHop& nextHop, const shared_ptr<pit::Ent
   NFD_LOG_DEBUG("afterNewNextHop pitEntry=" << pitEntry->getName()
                 << " nexthop=" << nextHop.getFace().getId());
 }
-void functionInvoke( Data& data, const std::string functionName, const std::string functionParasJSONStr)
+uint64_t functionInvoke(ns3::Ptr<ns3::Node> &node, Data& data, const std::string functionName, const std::string functionParasJSONStr)
 {
-  ndn::snake::util::functionInvoke(data, functionName, functionParasJSONStr);
+  return snake_util::functionInvoke(node, data, functionName, functionParasJSONStr);
 }
-
+std::string extractFunctionName(Data & data)
+{
+  std::string uri = data.getName().toUri();
+  uri = snake_util::unescape(uri);
+  return snake_util::extractFunctionName(uri);
+}
+std::string extractFunctionParas(const Interest & interest)
+{
+  Block block = interest.getApplicationParameters();
+  return ndn::encoding::readString(block);
+}
 void
 Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
                    const FaceEndpoint& egress)
@@ -247,40 +260,60 @@ Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
 
   // delete the PIT entry's in-record based on egress,
   // since Data is sent to face and endpoint from which the Interest was received
-  pitEntry->deleteInRecord(egress.face);
-  auto copiedData = ndn::snake::util::cloneData(data);
-  // shared_ptr<lp::FunctionTag> tag = copiedData->getTag<lp::FunctionTag>();
-  // NFD_LOG_DEBUG(">>> sendData receive functiontag is : " << (tag == nullptr? 0:*tag));
+  pitEntry->deleteExpiredOrNonLongLivedInRecords(time::steady_clock::now());
+  if(!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now())) {
+    pitEntry->deleteInRecord(egress.face);
+    NFD_LOG_DEBUG(">>>Delete PitEntry InRecord: " << pitEntry->getInterest() << egress);
+  }
+  auto copiedData = snake_util::cloneData(data);
 
-  if(ndn::snake::util::isBelong2SnakeSystem(*copiedData) &&
-     !(ndn::snake::util::isFunctionExecuted(*copiedData))){
-    if( ndn::snake::util::canExecuteFunction(*copiedData) ){
-      //Gets the current Node
-      int contextVal = ns3::Simulator::GetContext();
-      if(contextVal != -1){
-        ns3::Ptr<ns3::Node> node = ns3::NodeList::GetNode(contextVal);
-        NFD_LOG_DEBUG("Current Node ID: " << node->GetId());
-        ns3::Ptr<ns3::ComputationModel> cm = node->GetObject<ns3::ComputationModel>();
-        ns3::SysInfo sysinfo = cm->GetSystemStateInfo();
-        NFD_LOG_DEBUG("System state information on node <" << node->GetId() <<">" << 
-                      sysinfo.Serialize());
-        //node->TraceConnect();
+  int contextVal = ns3::Simulator::GetContext();
+  ns3::Ptr<ns3::Node> node = ns3::NodeList::GetNode(contextVal);
+  ns3::Ptr<ns3::ComputationModel> cm = node->GetObject<ns3::ComputationModel>();
+  if(snake_util::isBelong2SnakeSystem(*copiedData) &&
+     !(snake_util::isFunctionExecuted(*copiedData))){
+    if(cm != 0){
+      //Get current node available resources
+      ns3::SysInfo sysinfo = cm->GetSystemStateInfo();
+      //Extract function name
+      std::string functionName = extractFunctionName(*copiedData);
+      //Extract function parameters
+      std::string functionParameters = extractFunctionParas(pitEntry->getInterest());
+
+      auto metaDataTag = copiedData->getTag<lp::MetaDataTag>();
+      //Function execution cost estimating and updating.
+      if(nullptr != metaDataTag){
+        auto minCost = copiedData->getTag<lp::MinCostTag>();
+        if(nullptr == minCost){
+          minCost = make_shared<lp::MinCostTag>(ULLONG_MAX);
+          copiedData->setTag(minCost);
+        }
+        uint64_t costEta = snake_util::costEstimator(pitEntry->getInterest(), *copiedData, node);
+        NFD_LOG_DEBUG("Estimatting cost on current node: " << costEta );
+        
+        if(*minCost > costEta){
+          NFD_LOG_DEBUG("Original cost: " << *minCost <<", cost on current node is smaller: " << costEta);
+          copiedData->setTag(make_shared<lp::MinCostTag>(costEta));
+          uint64_t marker = snake_util::hashing(functionName, functionParameters, sysinfo.getUuid());
+          NFD_LOG_DEBUG("Marking new node to run " << functionName << ", paras: " 
+                         << functionParameters << " with marker: " << marker);
+          copiedData->setTag(make_shared<lp::MinCostMarkerTag>(marker));
+        }
+
+      } else if ( snake_util::canExecuteFunction(*copiedData)) {//Function invoking
+
+        NFD_LOG_INFO("Trying to execute function on Node " << node->GetId()
+                      << ", Function name: " << functionName << ", Function parameters: " 
+                      << functionParameters);
+        NFD_LOG_INFO("Node current avaliable resources: " << sysinfo.Serialize());
+        functionInvoke(node, *copiedData, functionName, functionParameters);
+        NFD_LOG_DEBUG("End executing function: " << functionName);
       }
-      //Invoke the function by the current node
-      //(Since we are in simulator, not real distributed env.)
-      std::string uri = copiedData->getName().toUri();
-      uri = ndn::snake::util::unescape(uri);
-      auto functionNameAndParameters = ndn::snake::util::extractFunctionNameAndParameters(uri);
-      std::string functionName = std::get<0>(functionNameAndParameters);
-      //TODO functionparameters should use Object.
-      std::string functionParameters = std::get<1>(functionNameAndParameters);
-      NFD_LOG_DEBUG("Begin executing function: " << functionName);
-      functionInvoke(*copiedData, functionName, functionParameters);
-      NFD_LOG_DEBUG("End executing function: " << functionName);
-      ndn::snake::util::afterFunctionInvoke(*copiedData);
+    } else {
+      NFD_LOG_ERROR("Computation Model not installed!");
     }
   }
-
+  
   if (pitToken != nullptr) {
     Data data2 = *copiedData; // make a copy so each downstream can get a different PIT token
     data2.setTag(pitToken);
