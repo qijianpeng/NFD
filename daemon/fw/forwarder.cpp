@@ -481,6 +481,21 @@ Forwarder::onOutgoingData(const Data& data, const FaceEndpoint& egress)
   }
   // TODO traffic manager
 
+  // delay monitor
+  boost::uint64_t time = time::duration_cast<time::microseconds>(time::steady_clock::now().time_since_epoch()).count();
+  boost::uint64_t contextVal = ns3::Simulator::GetContext();
+  if(contextVal != -1){
+    if(nullptr != data.getTag<lp::HopDelayTag>()){
+      data.removeTag<lp::HopDelayTag>();
+    }
+    boost::uint64_t idWithTime = (boost::uint64_t(contextVal) << 56) | (time & 0x00ffffffffffffff);
+    data.setTag(make_shared<lp::HopDelayTag>(idWithTime));
+    // auto delayP = data.getTag<lp::HopDelayTag>();
+    // uint64_t delay = (*delayP) & 0x00ffffffffffffff;
+    // boost::uint64_t node = (*delayP) >> 56;
+    // NFD_LOG_DEBUG("TIME: " << delay << ", Set Node Id: " << node);
+  }
+
   // send Data
   //
   egress.face.sendData(data, egress.endpoint);

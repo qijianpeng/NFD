@@ -202,7 +202,10 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
   if (minCostMarkerTag != nullptr) {
     lpPacket.add<lp::MinCostMarkerTagField>(*minCostMarkerTag);
   }
-  
+  shared_ptr<lp::HopDelayTag> hopDelayTag = netPkt.getTag<lp::HopDelayTag>();
+  if (hopDelayTag != nullptr) {
+    lpPacket.add<lp::HopDelayTagField>(*hopDelayTag);
+  }
   
 }
 
@@ -458,6 +461,9 @@ GenericLinkService::decodeInterest(const Block& netPkt, const lp::Packet& firstP
   if(firstPkt.has<lp::MinCostMarkerTagField>()) {
     interest->setTag(make_shared<lp::MinCostMarkerTag>(firstPkt.get<lp::MinCostMarkerTagField>()));
   }
+  if(firstPkt.has<lp::HopDelayTagField>()) {
+    interest->setTag(make_shared<lp::HopDelayTag>(firstPkt.get<lp::HopDelayTagField>()));
+  }
   this->receiveInterest(*interest, endpointId);
 }
 
@@ -540,6 +546,9 @@ GenericLinkService::decodeData(const Block& netPkt, const lp::Packet& firstPkt,
   }
   if(firstPkt.has<lp::MinCostMarkerTagField>()) {
     data->setTag(make_shared<lp::MinCostMarkerTag>(firstPkt.get<lp::MinCostMarkerTagField>()));
+  }
+  if(firstPkt.has<lp::HopDelayTagField>()) {
+    data->setTag(make_shared<lp::HopDelayTag>(firstPkt.get<lp::HopDelayTagField>()));
   }
   this->receiveData(*data, endpointId);
 }
