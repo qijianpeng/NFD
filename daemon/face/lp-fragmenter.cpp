@@ -120,6 +120,15 @@ LpFragmenter::fragmentPacket(const lp::Packet& packet, size_t mtu)
     return std::make_tuple(false, std::vector<lp::Packet>{});
   }
 
+  //FIXME(QJP): processing time logic should be in App level.
+  //issues #25
+  uint64_t processingTime = packet.processingTime;
+  // if(packet.has<lp::ProcessingTimeTagField>()){
+    // processingTime = packet.get<lp::ProcessingTimeTagField>();
+    // packet.remove<lp::ProcessingTimeTagField>();
+  // }
+
+  
   // populate fragments
   std::vector<lp::Packet> frags(fragCount);
   frags.front() = packet; // copy input packet to preserve other NDNLPv2 fields
@@ -131,6 +140,9 @@ LpFragmenter::fragmentPacket(const lp::Packet& packet, size_t mtu)
     frag.add<lp::FragIndexField>(fragIndex);
     frag.add<lp::FragCountField>(fragCount);
     frag.set<lp::FragmentField>({fragBegin, fragEnd});
+
+    frag.processingTime = processingTime;
+    
     BOOST_ASSERT(frag.wireEncode().size() <= mtu);
 
     ++fragIndex;

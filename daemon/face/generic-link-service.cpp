@@ -85,13 +85,15 @@ GenericLinkService::sendLpPacket(lp::Packet&& pkt, const EndpointId& endpointId)
   if (m_options.allowCongestionMarking) {
     checkCongestionLevel(pkt);
   }
-
   auto block = pkt.wireEncode();
   if (mtu != MTU_UNLIMITED && block.size() > static_cast<size_t>(mtu)) {
     ++this->nOutOverMtu;
     NFD_LOG_FACE_WARN("attempted to send packet over MTU limit");
     return;
   }
+  //FIXME(QJP): processing time logic should be in App level.
+  //issues #25
+  block.processingTime = pkt.processingTime;
   this->sendPacket(block, endpointId);
 }
 
@@ -186,9 +188,12 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
   if (dataPushTag != nullptr) {
     lpPacket.add<lp::DataPushTagField>(*dataPushTag);
   }
+  //FIXME(QJP): processing time logic should be in App level.
+  //issues #25
   shared_ptr<lp::ProcessingTimeTag> processingTimeTag = netPkt.getTag<lp::ProcessingTimeTag>();
   if (processingTimeTag != nullptr) {
-    lpPacket.add<lp::ProcessingTimeTagField>(*processingTimeTag);
+    //lpPacket.add<lp::ProcessingTimeTagField>(*processingTimeTag);
+    lpPacket.processingTime = *processingTimeTag;
   }
   shared_ptr<lp::MetaDataTag> metaDataTag = netPkt.getTag<lp::MetaDataTag>();
   if (metaDataTag != nullptr) {
