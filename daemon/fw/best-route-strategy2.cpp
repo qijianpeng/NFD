@@ -65,6 +65,12 @@ void
 BestRouteStrategy2::afterReceiveInterest(const FaceEndpoint& ingress, const Interest& interest,
                                          const shared_ptr<pit::Entry>& pitEntry)
 {
+  std::size_t found3 = interest.getName().toUri().find("Key-TID");
+  std::size_t found2 = interest.getName().toUri().find("/Trace");
+  if ((found2!=std::string::npos)&&(found3!=std::string::npos)&&(ingress.face.getScope() == ndn::nfd::FACE_SCOPE_LOCAL)){
+    Trace(ingress, interest, pitEntry);
+    return;
+  }
   RetxSuppressionResult suppression = m_retxSuppression.decidePerPitEntry(*pitEntry);
   if (suppression == RetxSuppressionResult::SUPPRESS) {
     NFD_LOG_DEBUG(interest << " from=" << ingress << " suppressed");

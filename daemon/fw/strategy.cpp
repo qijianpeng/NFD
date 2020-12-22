@@ -294,6 +294,7 @@ Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
           
           if(*minCost > costEta){
             NFD_LOG_DEBUG("Original cost: " << *minCost <<", cost on current node is smaller: " << costEta);
+            // std::cout << node->GetId() << ", Original cost: " << *minCost <<", cost on current node is smaller: " << costEta << std::endl;
             copiedData->setTag(make_shared<lp::MinCostTag>(costEta));
             uint64_t marker = snake_util::hashing(functionName, functionParameters, sysinfo.getUuid());
             NFD_LOG_DEBUG("Marking new node to run " << functionName << ", paras: " 
@@ -412,5 +413,169 @@ Strategy::lookupFib(const pit::Entry& pitEntry) const
   return *fibEntry; // only occurs if no delegation finds a FIB nexthop
 }
 
+// Trace route
+void
+Strategy::notfound(const FaceEndpoint& ingress, const shared_ptr<pit::Entry>& pitEntry, const Interest& interest){           
+  // notfound simply stays put
+  NFD_LOG_DEBUG("Cs lookup negative, procees to forwarding based on S or M");
+  int k = (-1)*interest.getName().size();    
+  const ndn::Name name = GetLookupName(interest);              
+  // if it's a multipath interest check               
+  if (interest.getName().at(k+1).toUri()=="S"){
+    S_ForwardIt(ingress, interest, pitEntry, name);
+  }else{
+    M_ForwardIt(ingress, interest, pitEntry, name);
+  }
+}
+
+void
+Strategy::found(const FaceEndpoint& ingress, const shared_ptr<pit::Entry>& pitEntry, const Interest& interest, const Data& data){
+        
+  NFD_LOG_DEBUG("Traced name is cached");
+
+  lp::NackHeader nackHeader;
+  nackHeader.setReason(lp::NackReason::CACHE_LOCAL);
+
+  this->sendNack(pitEntry, ingress, nackHeader);
+  this->rejectPendingInterest(pitEntry);          
+}
+
+void 
+Strategy::Cache_check(const FaceEndpoint& ingress, const shared_ptr<pit::Entry>& pitEntry, const ndn::Name name){
+  // P2 = c
+  NFD_LOG_DEBUG("Checking the content store ");                    
+  // Access to the Forwarder's FIB
+  const Cs& cs = m_forwarder.getCs();                    
+  //Cs lookup with name                    
+  NFD_LOG_DEBUG("Creating a fake interest for the cs_lookup");                        
+  ndn::Interest fi;
+  fi.setName(name);
+  fi.setInterestLifetime(ndn::time::milliseconds(10000));                    
+  cs.find(fi, bind(&Strategy::found, this, ingress, pitEntry, _1, _2),
+  bind(&Strategy::notfound, this, ingress, pitEntry, _1));  
+}   
+
+
+void
+Strategy::M_ForwardIt(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry, const ndn::Name name){
+  const Fib& fib = m_forwarder.getFib();                    
+  // FIB lookup with name
+  const fib::Entry& fibEntry = fib.findLongestPrefixMatch(name);                                       
+  // Getting faces for nexthops??
+  std::string face_id = interest.getName().at(-1).toUri(); // Regular multipath request >> has face_id in the end
+  const fib::NextHopList& nexthops = fibEntry.getNextHops();                    
+  for (fib::NextHopList::const_iterator it = nexthops.begin(); it != nexthops.end(); ++it) {                        
+    if(it->getFace().getId()==std::stoi(face_id)){                            
+      if((it->getFace().getScope()== ndn::nfd::FACE_SCOPE_LOCAL)){                             
+        lp::NackHeader nackHeader;
+        nackHeader.setReason(lp::NackReason::PRODUCER_LOCAL);                                                            
+        this->sendNack(pitEntry, ingress, nackHeader);
+        this->rejectPendingInterest(pitEntry);
+        return;                                
+      }else{                                
+        this->sendInterest(pitEntry, FaceEndpoint(it->getFace(), 0), interest);
+        return;
+      }
+    }
+  }                                        
+  return;	
+}
+void       
+Strategy::multi_process(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry){
+  NFD_LOG_DEBUG("Received a multipath interest");                    
+  //Constructing name                    
+  int i;
+  int k = (-1)*interest.getName().size();  
+  const ndn::Name c = interest.getName().at(k+3).toUri();
+  const ndn::Name n = c.toUri();                    
+  // actual multipath
+  std::string face_id = interest.getName().at(-1).toUri(); // Regular multipath request >> has face_id in the end
+  ndn::Name v = n.toUri();                    
+  for(i=k+4; i< -2; i++){                        
+      v = v.toUri() + "/" + interest.getName().at(i).toUri();                        
+  }                
+  
+  const ndn::Name name = v.toUri();                                                          
+  if (interest.getName().at(k+2).toUri()== "c"){                    
+      Cache_check(ingress, pitEntry, name);               
+  }else{
+    M_ForwardIt(ingress, interest, pitEntry, name);
+  }  
+}
+
+void
+Strategy::S_ForwardIt(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry, const ndn::Name name){
+  NFD_LOG_DEBUG("Entering S_ForwardIt with name: " << name);
+  // Access to the Forwarder's FIB
+  const Fib& fib = m_forwarder.getFib();
+  // FIB lookup with name
+  const fib::Entry& fibEntry = fib.findLongestPrefixMatch(name);
+  // const fib::Entry& fibEntry = this->lookupFib(*pitEntry);
+  // Getting faces for nexthops??
+  const fib::NextHopList& nexthops = fibEntry.getNextHops();
+  /// This part is for sending
+  for (fib::NextHopList::const_iterator it = nexthops.begin(); it != nexthops.end(); ++it) {
+    NFD_LOG_DEBUG("S_ForwardIt: faceid: " << it->getFace().getId() << ", local-uri: " 
+                  << it->getFace().getLocalUri().toString() << ", remote-uri: " << it->getFace().getRemoteUri().toString());
+    // if (it->getFace().getScope()== ndn::nfd::FACE_SCOPE_LOCAL){
+    //   lp::NackHeader nackHeader;
+    //   nackHeader.setReason(lp::NackReason::PRODUCER_LOCAL);
+    //   this->sendNack(pitEntry, ingress, nackHeader);
+    //   this->rejectPendingInterest(pitEntry);
+    //   return;
+    // }else{
+      this->sendInterest(pitEntry, FaceEndpoint(it->getFace(), 0), interest);
+    // }
+    return;
+  }
+}
+
+  
+const ndn::Name
+Strategy::GetLookupName(const Interest& interest){                 
+  int i;
+  int k = (-1)*interest.getName().size();
+  const ndn::Name c = interest.getName().at(k+3).toUri();
+  const ndn::Name n = c.toUri() ;
+  //const ndn::Name x = n.toUri() + c.toUri
+  ndn::Name v = n.toUri();
+  for(i=k+4; i< -1; i++){
+    v = v.toUri() + "/" + interest.getName().at(i).toUri();
+  }
+  return v.toUri();
+}
+            
+void
+Strategy::single_process(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry) {        	                  
+  NFD_LOG_DEBUG("**************Single path option****************");
+  // Extract name from interest
+  const ndn::Name name = GetLookupName(interest);
+  int k = (-1)*interest.getName().size();
+  if (interest.getName().at(k+2).toUri()== "c"){
+    Cache_check(ingress, pitEntry, name);
+  }else{
+    S_ForwardIt(ingress, interest, pitEntry, name);
+  } // end of option p2
+}// End of if S
+
+void 
+Strategy::Trace(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry){
+  
+  std::size_t found3 = interest.getName().toUri().find("Key-TID");
+  std::size_t found2 = interest.getName().toUri().find("/Trace");
+  NFD_LOG_DEBUG("Entering Trace pipeline. found Key-TID: " << found3 << ", found /Trace: " << found2
+                << ", Ingress: " << ingress.face.getScope() << ", Name: "<< interest.getName().toUri());
+  if ((found2!=std::string::npos)&&(found3!=std::string::npos)&&(ingress.face.getScope() == ndn::nfd::FACE_SCOPE_LOCAL)){
+    int k = (-1)*interest.getName().size();                
+    // if it's a multipath interest check               
+    if (interest.getName().at(k+1).toUri()=="M"){
+      multi_process(ingress, interest, pitEntry);
+    }
+    if (interest.getName().at(k+1).toUri()=="S"){
+      NFD_LOG_DEBUG("Entering single_process pipeline.");
+      single_process(ingress, interest, pitEntry);
+    }
+  }
+}
 } // namespace fw
 } // namespace nfd

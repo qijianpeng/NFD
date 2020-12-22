@@ -438,6 +438,40 @@ private: // instance fields
   MeasurementsAccessor m_measurements;
 
   bool m_wantNewNextHopTrigger = false;
+
+public:// Trace route
+  virtual void 
+  found(const FaceEndpoint& ingress, const shared_ptr<pit::Entry>& pitEntry, const Interest& interest, const Data& data);
+
+  virtual void 
+  notfound(const FaceEndpoint& ingress, const shared_ptr<pit::Entry>& pitEntry, const Interest& interest);
+  
+  virtual void 
+  Trace(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry);
+  
+  virtual void
+  Cache_check(const FaceEndpoint& ingress, const shared_ptr<pit::Entry>& pitEntry, const ndn::Name name);
+  
+  virtual void
+  multi_process(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry);
+  
+  virtual void
+  single_process(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry);
+  
+  virtual void
+  S_ForwardIt(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry, const ndn::Name name);
+  
+  virtual void
+  M_ForwardIt(const FaceEndpoint& ingress, const Interest& interest, const shared_ptr<pit::Entry>& pitEntry, const ndn::Name name);
+  
+  const ndn::Name GetLookupName(const Interest& interest);
+
+
+private: // Trace route
+	bool in = true;
+	ndn::Name nx = "name";
+	int i = 0;
+	int j = 0;
 };
 
 } // namespace fw
