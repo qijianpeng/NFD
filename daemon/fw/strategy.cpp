@@ -265,67 +265,15 @@ Strategy::sendData(const shared_ptr<pit::Entry>& pitEntry, const Data& data,
     pitEntry->deleteInRecord(egress.face);
     NFD_LOG_DEBUG(">>>Delete PitEntry InRecord: " << pitEntry->getInterest() << egress);
   }
-  auto copiedData = snake_util::cloneData(data);
+  // auto copiedData = snake_util::cloneData(data);
 
-  int contextVal = ns3::Simulator::GetContext();
-  if(contextVal != -1){
-    ns3::Ptr<ns3::Node> node = ns3::NodeList::GetNode(contextVal);
-    ns3::Ptr<ns3::ComputationModel> cm = node->GetObject<ns3::ComputationModel>();
-    if(snake_util::isBelong2SnakeSystem(*copiedData) &&
-      !(snake_util::isFunctionExecuted(*copiedData))){
-      if(cm != 0){
-        //Get current node available resources
-        ns3::SysInfo sysinfo = cm->GetSystemStateInfo();
-        //Extract function name
-        std::string functionName = extractFunctionName(*copiedData);
-        //Extract function parameters
-        std::string functionParameters = extractFunctionParas(pitEntry->getInterest());
-
-        auto metaDataTag = copiedData->getTag<lp::MetaDataTag>();
-        //Function execution cost estimating and updating.
-        if(nullptr != metaDataTag){
-          auto minCost = copiedData->getTag<lp::MinCostTag>();
-          if(nullptr == minCost){
-            minCost = make_shared<lp::MinCostTag>(ULLONG_MAX);
-            copiedData->setTag(minCost);
-          }
-          uint64_t costEta = snake_util::costEstimator(pitEntry->getInterest(), *copiedData, node);
-          NFD_LOG_DEBUG("Estimatting cost on current node: " << costEta );
-          
-          if(*minCost > costEta){
-            NFD_LOG_DEBUG("Original cost: " << *minCost <<", cost on current node is smaller: " << costEta);
-            // std::cout << node->GetId() << ", Original cost: " << *minCost <<", cost on current node is smaller: " << costEta << std::endl;
-            copiedData->setTag(make_shared<lp::MinCostTag>(costEta));
-            uint64_t marker = snake_util::hashing(functionName, functionParameters, sysinfo.getUuid());
-            NFD_LOG_DEBUG("Marking new node to run " << functionName << ", paras: " 
-                          << functionParameters << " with marker: " << marker);
-            copiedData->setTag(make_shared<lp::MinCostMarkerTag>(marker));
-          }
-
-        } else if ( snake_util::canExecuteFunction(*copiedData)) {//Function invoking
-          uint64_t marker = snake_util::hashing(functionName, functionParameters, sysinfo.getUuid());
-          auto choosenMarker = copiedData->getTag<lp::MinCostMarkerTag>();
-          if(marker == *choosenMarker){
-            NFD_LOG_INFO("Trying to execute function on Node " << node->GetId()
-                          << ", Function name: " << functionName << ", Function parameters: " 
-                          << functionParameters);
-            NFD_LOG_INFO("Node current avaliable resources: " << sysinfo.Serialize());
-            functionInvoke(node, *copiedData, functionName, functionParameters);
-            NFD_LOG_DEBUG("End executing function: " << functionName);
-          }
-        }
-      } else {
-        NFD_LOG_ERROR("Computation Model not installed!");
-      }
-    }
-  }
   if (pitToken != nullptr) {
-    Data data2 = *copiedData; // make a copy so each downstream can get a different PIT token
+    Data data2 = data; // make a copy so each downstream can get a different PIT token
     data2.setTag(pitToken);
     m_forwarder.onOutgoingData(data2, egress);
     return;
   }
-  m_forwarder.onOutgoingData(*copiedData, egress);
+  m_forwarder.onOutgoingData(data, egress);
 }
 
 void

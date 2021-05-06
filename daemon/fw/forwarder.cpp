@@ -344,10 +344,9 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     NFD_LOG_DEBUG("onIncomingData matching=" << pitEntry->getName());
 
     // set PIT expiry timer to now
-    if(!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now())){
-      this->setExpiryTimer(pitEntry, 0_ms);
-    }
+    this->setExpiryTimer(pitEntry, 0_ms);
 
+    beforeSatisfyInterest(*pitEntry, ingress.face, data);
     // trigger strategy: after receive Data
     this->dispatchToStrategy(*pitEntry,
       [&] (fw::Strategy& strategy) { strategy.afterReceiveData(pitEntry, ingress, data); });
@@ -356,13 +355,11 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
     pitEntry->isSatisfied = true;
     pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
-    pitEntry->deleteExpiredOrNonLongLivedInRecords(time::steady_clock::now());
-    if(!pitEntry->hasNonExpiredLongLivedInRecord(time::steady_clock::now())) {
-      // Dead Nonce List insert if necessary (for out-record of inFace)
-      this->insertDeadNonceList(*pitEntry, &ingress.face);
-      // delete PIT entry's out-record
-      pitEntry->deleteOutRecord(ingress.face);
-    }
+    // Dead Nonce List insert if necessary (for out-record of inFace)
+    this->insertDeadNonceList(*pitEntry, &ingress.face);
+
+    // delete PIT entry's out-record
+    pitEntry->deleteOutRecord(ingress.face);
   }
   // when more than one PIT entry is matched, trigger strategy: before satisfy Interest,
   // and send Data to all matched out faces
@@ -381,11 +378,10 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       }
 
       // set PIT expiry timer to now
-      if(!pitEntry->hasNonExpiredLongLivedInRecord(now)) {
-        this->setExpiryTimer(pitEntry, 0_ms);
-      }
+      this->setExpiryTimer(pitEntry, 0_ms);
 
       // invoke PIT satisfy callback
+      beforeSatisfyInterest(*pitEntry, ingress.face, data);
       this->dispatchToStrategy(*pitEntry,
         [&] (fw::Strategy& strategy) { strategy.beforeSatisfyInterest(pitEntry, ingress, data); });
 
@@ -393,18 +389,12 @@ Forwarder::onIncomingData(const FaceEndpoint& ingress, const Data& data)
       pitEntry->isSatisfied = true;
       pitEntry->dataFreshnessPeriod = data.getFreshnessPeriod();
 
-      pitEntry->deleteExpiredOrNonLongLivedInRecords(now);
-      if(!pitEntry->hasNonExpiredLongLivedInRecord(now)) {
-        // Dead Nonce List insert if necessary (for out-record of inFace)
-        this->insertDeadNonceList(*pitEntry, &ingress.face);
+      // Dead Nonce List insert if necessary (for out-record of inFace)
+      this->insertDeadNonceList(*pitEntry, &ingress.face);
 
-        // clear PIT entry's in and out records
-        pitEntry->clearInRecords();
-        pitEntry->deleteOutRecord(ingress.face);
-      } else {
-        //TODO what will happen?
-        
-      }
+      // clear PIT entry's in and out records
+      pitEntry->clearInRecords();
+      pitEntry->deleteOutRecord(ingress.face);
     }
 
     // foreach pending downstream

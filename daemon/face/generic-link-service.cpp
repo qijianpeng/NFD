@@ -193,7 +193,8 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
   shared_ptr<lp::ProcessingTimeTag> processingTimeTag = netPkt.getTag<lp::ProcessingTimeTag>();
   if (processingTimeTag != nullptr) {
     //lpPacket.add<lp::ProcessingTimeTagField>(*processingTimeTag);
-    lpPacket.processingTime = *processingTimeTag;
+    // lpPacket.processingTime = *processingTimeTag;
+    lpPacket.processingTime = 0;
   }
   shared_ptr<lp::MetaDataTag> metaDataTag = netPkt.getTag<lp::MetaDataTag>();
   if (metaDataTag != nullptr) {
@@ -202,6 +203,10 @@ GenericLinkService::encodeLpFields(const ndn::PacketBase& netPkt, lp::Packet& lp
   shared_ptr<lp::MinCostTag> minCostTag = netPkt.getTag<lp::MinCostTag>();
   if (minCostTag != nullptr) {
     lpPacket.add<lp::MinCostTagField>(*minCostTag);
+  }
+  shared_ptr<lp::MaxCostTag> maxCostTag = netPkt.getTag<lp::MaxCostTag>();
+  if (maxCostTag != nullptr) {
+    lpPacket.add<lp::MaxCostTagField>(*maxCostTag);
   }
   shared_ptr<lp::MinCostMarkerTag> minCostMarkerTag = netPkt.getTag<lp::MinCostMarkerTag>();
   if (minCostMarkerTag != nullptr) {
@@ -540,14 +545,17 @@ GenericLinkService::decodeData(const Block& netPkt, const lp::Packet& firstPkt,
   if(firstPkt.has<lp::DataPushTagField>()) {
     data->setTag(make_shared<lp::DataPushTag>(firstPkt.get<lp::DataPushTagField>()));
   }
-  if(firstPkt.has<lp::ProcessingTimeTagField>()) {
-    data->setTag(make_shared<lp::ProcessingTimeTag>(firstPkt.get<lp::ProcessingTimeTagField>()));
-  }
+  // if(firstPkt.has<lp::ProcessingTimeTagField>()) {
+  //   data->setTag(make_shared<lp::ProcessingTimeTag>(firstPkt.get<lp::ProcessingTimeTagField>()));
+  // }
   if(firstPkt.has<lp::MetaDataTagField>()) {
     data->setTag(make_shared<lp::MetaDataTag>(firstPkt.get<lp::MetaDataTagField>()));
   }
   if(firstPkt.has<lp::MinCostTagField>()) {
     data->setTag(make_shared<lp::MinCostTag>(firstPkt.get<lp::MinCostTagField>()));
+  }
+  if(firstPkt.has<lp::MaxCostTagField>()) {
+    data->setTag(make_shared<lp::MaxCostTag>(firstPkt.get<lp::MaxCostTagField>()));
   }
   if(firstPkt.has<lp::MinCostMarkerTagField>()) {
     data->setTag(make_shared<lp::MinCostMarkerTag>(firstPkt.get<lp::MinCostMarkerTagField>()));
